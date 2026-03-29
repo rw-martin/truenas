@@ -1,0 +1,4 @@
+requests
+websockets
+python-dotenv
+urllib3
