@@ -8,3 +8,4 @@ output*
 *.tar
 .env
 *.sh
+.pre-commit-config.yaml

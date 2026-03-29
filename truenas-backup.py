@@ -6,78 +6,15 @@ from pathlib import Path
 from dotenv import load_dotenv
 import urllib3
 
+
 # load environment variables from .env (if present)
 load_dotenv()
-
-# suppress InsecureRequestWarning when VERIFY_SSL is disabled
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-
-def assert_no_hardcoded_secrets():
-    """Fail fast if there are hardcoded API keys or secret-like literals in the script."""
-    try:
-        with open(__file__, "r", encoding="utf-8") as f:
-            content = f.read()
-    except Exception:
-        return
-
-    checks = []
-    if re.search(r"API_KEY\s*=\s*['\"][^'\"]+['\"]", content):
-        checks.append("API_KEY string literal")
-    if re.search(r"(PASS|PASSWORD|SECRET|TOKEN)\s*=\s*['\"][^'\"]{8,}['\"]", content, re.I):
-        checks.append("potential hardcoded credential")
-
-    if checks:
-        msg = "Hardcoded secret check failed: " + ", ".join(checks)
-        log_event("error", "hardcoded_secret_detected", {"details": msg})
-        raise SystemExit(msg)
-
-
-assert_no_hardcoded_secrets()
-
-########################################
-# CONFIG
-########################################
-TRUENAS_HOST = os.getenv("TRUENAS_HOST", "truenas.local")
-API_KEY = os.getenv("API_KEY")
-OUTPUT_FILE_ROOT = os.getenv("OUTPUT_FILE_ROOT")
-OUTPUT_FILE = os.getenv("OUTPUT_FILE")
-
-API_KEY=WUlQFrAcEgC4MOGjAXYZoz3sPCLABC7fSZzr4YbzwuDEFCzi4T5dixkitzys
-
-if not OUTPUT_FILE:
-    if OUTPUT_FILE_ROOT:
-        OUTPUT_FILE = os.path.join(
-            OUTPUT_FILE_ROOT,
-            f"truenas-config-{datetime.now().strftime('%Y%m%d-%H%M%S')}.tar",
-        )
-    else:
-        OUTPUT_FILE = f"./truenas-config-{datetime.now().strftime('%Y%m%d-%H%M%S')}.tar"
 
 VERIFY_SSL = os.getenv("VERIFY_SSL", "false").strip().lower() in ("1", "true", "yes")
 DISABLE_SSL_VERIFICATION = os.getenv("DISABLE_SSL_VERIFICATION", "false").strip().lower() in ("1", "true", "yes")
 LOG_FILE = os.getenv("TRUENAS_LOG_FILE", os.path.join(sys.path[0], "truenas.jsonl"))
 OS_PID = os.getpid()
 HOST_NAME = socket.gethostname().split(".")[0]
-
-def _write_jsonl(path, obj):
-    try:
-        line = json.dumps(obj, separators=(",", ":"), default=str, ensure_ascii=False)
-        # use append mode and fsync for durability
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(line + "\n")
-            f.flush()
-            try:
-                os.fsync(f.fileno())
-            except Exception:
-                # best-effort; don't raise on fsync failure
-                pass
-    except Exception as e:
-        # avoid crashing the main program for logging failures
-        try:
-            print(f"[LOG ERROR] Could not write log: {e}", file=sys.stderr)
-        except Exception:
-            pass
 
 def log_event(level, event, details=None, extra=None, timestamp=None):
     if timestamp is None:
@@ -98,6 +35,43 @@ def log_event(level, event, details=None, extra=None, timestamp=None):
         entry["extra"] = extra
 
     _write_jsonl(LOG_FILE, entry)
+
+def _write_jsonl(path, obj):
+    try:
+        line = json.dumps(obj, separators=(",", ":"), default=str, ensure_ascii=False)
+        # use append mode and fsync for durability
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except Exception:
+                # best-effort; don't raise on fsync failure
+                pass
+    except Exception as e:
+        # avoid crashing the main program for logging failures
+        try:
+            print(f"[LOG ERROR] Could not write log: {e}", file=sys.stderr)
+        except Exception:
+            pass
+
+########################################
+# CONFIG
+########################################
+TRUENAS_HOST = os.getenv("TRUENAS_HOST", "truenas.local")
+API_KEY = os.getenv("API_KEY")
+OUTPUT_FILE_ROOT = os.getenv("OUTPUT_FILE_ROOT")
+OUTPUT_FILE = os.getenv("OUTPUT_FILE")
+
+if not OUTPUT_FILE:
+    if OUTPUT_FILE_ROOT:
+        OUTPUT_FILE = os.path.join(
+            OUTPUT_FILE_ROOT,
+            f"truenas-config-{datetime.now().strftime('%Y%m%d-%H%M%S')}.tar",
+        )
+    else:
+        OUTPUT_FILE = f"./truenas-config-{datetime.now().strftime('%Y%m%d-%H%M%S')}.tar"
+
 
 ########################################
 # LOAD API KEY
