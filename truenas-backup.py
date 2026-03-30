@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 
-import asyncio,json,ssl,requests,sys,os,socket,re,websockets
+import asyncio,json,ssl,requests,sys,os,socket,re,websockets, urllib3
 from datetime import datetime, timezone
 from pathlib import Path
 from dotenv import load_dotenv
-import urllib3
-
 
 # load environment variables from .env (if present)
 load_dotenv()
@@ -87,13 +85,12 @@ def load_api_key():
             try:
                 API_KEY = key_path.read_text(encoding="utf-8").strip()
             except Exception:
-                log_event("error", "load_api_key_failed", {"reason": "could not read .truenas-api-key"})
+                pass  # Silent failure for file read
 
     if not API_KEY:
-        log_event("error", "load_api_key_failed", {"reason": "API key missing; set API_KEY in .env or .truenas-api-key"})
-        sys.exit(1)
+        raise SystemExit("API key missing; set API_KEY in .env or .truenas-api-key")
 
-    log_event("info", "api_key_loaded", {"key_length": len(API_KEY), "truenas_api_key": API_KEY[:16] + "..." if len(API_KEY) > 16 else API_KEY})
+    # No logging here, as per simplified logging
     return API_KEY
 
 ########################################
@@ -116,7 +113,6 @@ async def get_download_url():
         }))
 
         await ws.recv()  # consume server response
-        log_event("info", "websocket_connected", {"status_code": ws.response.status_code, "reason": ws.response.reason_phrase, "uri": uri})
 
         # 2️⃣ Authenticate
         await ws.send(json.dumps({
@@ -130,8 +126,6 @@ async def get_download_url():
 
         if auth_resp.get("msg") == "result" and auth_resp.get("error"):
             raise Exception(f"Auth failed: {auth_resp['error']}")
-
-        log_event("info", "websocket_authenticated")
 
         # 3️⃣ Request download
         await ws.send(json.dumps({
@@ -157,7 +151,6 @@ async def get_download_url():
                     raise Exception(f"API error: {response['error']}")
 
                 job_id, url = response["result"]
-                log_event("info", "download_url_received", {"job_id": job_id, "url": url[:32] + "..." if len(url) > 32 else url})
                 return job_id, url
 
 ########################################
@@ -167,12 +160,9 @@ def download_file(url):
     if not url.startswith("http"):
         url = f"https://{TRUENAS_HOST}{url}"
 
-    log_event("info", "download_started", {"filename": OUTPUT_FILE})
-
     r = requests.get(url, verify=VERIFY_SSL, stream=True)
 
     if r.status_code != 200:
-        log_event("error", "download_failed", {"http_status": r.status_code, "url": url})
         raise Exception(f"Download failed: HTTP {r.status_code}")
 
     with open(OUTPUT_FILE, "wb") as f:
@@ -185,8 +175,6 @@ def download_file(url):
     except Exception:
         size = None
 
-    #log_event("info", "download_completed", {"bytes": size})
-
 ########################################
 # VALIDATION
 ########################################
@@ -194,40 +182,71 @@ def validate_file():
     size = os.path.getsize(OUTPUT_FILE)
 
     if size < 50000:
-        log_event("error", "validation_failed", {"reason": "file too small", "bytes": size})
         raise Exception("Backup file too small")
-
-    log_event("info", "validation_success", {"bytes": size, "output": OUTPUT_FILE})
 
 ########################################
 # MAIN
 ########################################
 
 async def main():
+    start_time = datetime.now(timezone.utc)
+    job_id = None
+    filesize_bytes = None
+    status = "success"
+    error_details = None
+
+    print("[+] Requesting backup via WebSocket")
+
     # suppress InsecureRequestWarning when VERIFY_SSL is disabled
     if os.getenv("DISABLE_SSL_VERIFICATION", "false").strip().lower() in ("1", "true", "yes"):
       urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-      log_event("warning", "ssl_warnings_disabled", {"reason": "DISABLE_SSL_VERIFICATION environment variable set"})
-  
-    print("[+] Requesting backup via WebSocket (DDP)")
-    log_event("info", "backup_started")
 
     try:
         job_id, url = await get_download_url()
-
-        #print(f"[+] Job ID: {job_id}")
-        #print(f"[+] URL: {url.split('/')[-1][:42] + '...' if len(url) > 42 else url}")
 
         # CRITICAL: download immediately
         download_file(url)
 
         validate_file()
 
+        # Get file size
+        try:
+            filesize_bytes = os.path.getsize(OUTPUT_FILE)
+        except Exception:
+            filesize_bytes = None
+
         print(f"[+] Backup complete: {OUTPUT_FILE}")
-        log_event("info", "backup_completed", {"output": OUTPUT_FILE})
+
     except Exception as e:
-        log_event("error", "backup_failed", {"error": str(e)})
+        status = "error"
+        error_details = str(e)
         raise
+
+    finally:
+        # Calculate duration
+        end_time = datetime.now(timezone.utc)
+        duration_ms = int((end_time - start_time).total_seconds() * 1000)
+
+        # Single comprehensive log entry
+        log_entry = {
+            "timestamp": end_time.isoformat(),
+            "pid": OS_PID,
+            "event": "config_backup",
+            "status": status,
+            "host": HOST_NAME,
+            "duration_ms": duration_ms,
+            "backup_file": OUTPUT_FILE
+        }
+
+        if job_id is not None:
+            log_entry["job_id"] = job_id
+        if filesize_bytes is not None:
+            log_entry["filesize_bytes"] = filesize_bytes
+        if error_details:
+            log_entry["error"] = error_details
+
+        _write_jsonl(LOG_FILE, log_entry)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
