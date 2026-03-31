@@ -1,4 +1,4 @@
-requests
-websockets
-python-dotenv
-urllib3
+requests>=2.31
+websockets>=12.0
+python-dotenv>=1.0
+urllib3>=1.26

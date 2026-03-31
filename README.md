@@ -1,72 +1,113 @@
 # truenas-backup
-This repository contains a single script, `truenas-backup.py` (alias `truenas.py`), for fetching a TrueNAS configuration backup via the TrueNAS websocket API (DDP protocol) and storing it locally.
 
-## What it does
+`truenas-backup.py` fetches a TrueNAS configuration backup through the TrueNAS WebSocket API and saves it locally as a `.tar` file.
 
-- Connects to a TrueNAS host via Secure WebSocket (`wss://<TRUENAS_HOST>/websocket`).
-- Authenticates with `auth.login_with_api_key` using an API key loaded from `.truenas-api-key` in the script directory.
-- Calls `core.download` with `config.save` to request a backup tar download URL.
-- Downloads the backup file to `OUTPUT_FILE` (default includes timestamp)
-- Validates the file size (must be >= 50 KB).
-- Logs all events in JSONL format to `TRUENAS_LOG_FILE`.
+## What It Does
+
+- Connects to `wss://<host>/websocket`
+- Authenticates with `auth.login_with_api_key`
+- Calls `core.download` for `config.save`
+- Downloads the returned backup archive
+- Validates that the downloaded file is at least 50 KB
+- Writes a single JSONL audit entry for each run
+
+## Requirements
+
+- Python 3.10+
+- A TrueNAS API key
+
+Install dependencies with:
+
+```bash
+python3 -m pip install -r requirements.txt
+```
 
 ## Configuration
 
-Edit the constants at the top of `truenas.py`:
+Configuration can come from CLI flags, environment variables, or a `.truenas-api-key` file.
 
-- `TRUENAS_HOST` – TrueNAS host/fqdn
-- `API_KEY` – not normally set; script reads from `.truenas-api-key`
-- `OUTPUT_FILE` – file path where the downloaded backup is saved
-- `VERIFY_SSL` – set `True` for proper TLS verification, `False` to bypass cert checks
-- `LOG_FILE` – path to JSONL audit/metrics file
+Precedence is:
 
-Create `.truenas-api-key` next to `truenas.py` containing your API key lone on one line.
+1. CLI arguments
+2. Environment variables or `.env`
+3. `.truenas-api-key` for the API key only
+4. Built-in defaults
 
-## Usage
+Supported environment variables:
 
-```bash
-python3 truenas.py
-```
+- `TRUENAS_HOST`
+- `API_KEY`
+- `OUTPUT_FILE`
+- `OUTPUT_FILE_ROOT`
+- `TRUENAS_LOG_FILE`
+- `VERIFY_SSL`
 
-When successful, output contains:
-
-- `URL` returned from TrueNAS for config download
-- `Backup complete: <OUTPUT_FILE>`
-
-## Dependencies
-
-- Python 3.8+
-- `requests`
-- `websockets`
-- `python-dotenv`
-- `urllib3` (used by `requests`)
-
-Install with:
-
-```bash
-pip install -r requirements.txt
-```
-
-## Environment variables and .env support
-The script now reads config from a `.env` file (via `python-dotenv`), for example:
+Example `.env`:
 
 ```env
-TRUENAS_HOST=nas.yourdomain.com
-API_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxx
-OUTPUT_FILE_ROOT=/truenas/
-VERIFY_SSL=false
-TRUENAS_LOG_FILE=/truenas/logs/truenas.jsonl
+TRUENAS_HOST=nas.example.com
+API_KEY=your-api-key
+OUTPUT_FILE_ROOT=/var/backups/truenas
+TRUENAS_LOG_FILE=/var/log/truenas/truenas.jsonl
+VERIFY_SSL=true
 ```
 
-- If `OUTPUT_FILE` is set in `.env`, it is used directly.
-- Otherwise `OUTPUT_FILE` is built from `OUTPUT_FILE_ROOT` + timestamp.
-- `VERIFY_SSL=false` disables TLS verification and suppresses `InsecureRequestWarning`.
+If `API_KEY` is not set, the script also checks for `.truenas-api-key` in the same directory as the script.
 
-## Behavior
+## CLI Usage
 
-- Logs events using `log_event(level, event, details, extra)`.
-- Exits non-zero on error (API/auth failures, download issues, validation failures).
+Basic usage:
+
+```bash
+python3 truenas-backup.py
+```
+
+Available switches:
+
+- `--host`
+- `--api-key`
+- `--output-file`
+- `--output-root`
+- `--log-file`
+- `--verify-ssl`
+- `--insecure`
+
+Examples:
+
+```bash
+python3 truenas-backup.py --host truenas.local --insecure
+```
+
+```bash
+python3 truenas-backup.py \
+  --host nas.example.com \
+  --output-root /var/backups/truenas \
+  --log-file /var/log/truenas/truenas.jsonl \
+  --verify-ssl
+```
+
+`--output-file` writes to an exact path.
+
+`--output-root` creates a timestamped file like `truenas-config-YYYYMMDD-HHMMSS.tar`.
+
+`--verify-ssl` and `--insecure` are mutually exclusive. If neither is passed, the script uses `VERIFY_SSL` from the environment and defaults to insecure mode if unset.
+
+## Logging
+
+Each run appends one JSON object to the configured JSONL log file, including:
+
+- timestamp
+- pid
+- host
+- status
+- duration
+- backup file path
+- job ID when available
+- file size when available
+- error text on failure
 
 ## Notes
-- The script is designed for local automation and the downloaded file should be secured carefully because it stores snesitive TrueNAS informaton.
-- Validate `TRUENAS_HOST` and SSL settings before exposing this script to untrusted networks.
+
+- The backup can contain sensitive TrueNAS configuration data. Store it securely.
+- If TLS verification is disabled, certificate warnings are suppressed for cleaner automation output.
+- `python-dotenv` is optional at runtime, but included in `requirements.txt` so `.env` loading works out of the box.
