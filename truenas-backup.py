@@ -214,8 +214,8 @@ async def get_download_url(settings: Settings) -> tuple[int, str]:
             if response.get("error"):
                 raise RuntimeError(f"API error: {response['error']}")
 
-            job_id, url = response["result"]
-            return job_id, url
+            truenas_job_id, url = response["result"]
+            return truenas_job_id, url
 
 
 def download_file(settings: Settings, url: str) -> int:
@@ -253,7 +253,7 @@ async def main(args: argparse.Namespace) -> None:
 
     settings = Settings.load(args)
     start_time = datetime.now(timezone.utc)
-    job_id = None
+    truenas_job_id = None
     filesize_bytes = None
     status = "success"
     error_details = None
@@ -264,7 +264,7 @@ async def main(args: argparse.Namespace) -> None:
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     try:
-        job_id, url = await get_download_url(settings)
+        truenas_job_id, url = await get_download_url(settings)
         download_file(settings, url)
         filesize_bytes = validate_file(settings.output_file)
         print(f"[+] Backup complete: {settings.output_file}")
@@ -285,8 +285,8 @@ async def main(args: argparse.Namespace) -> None:
             "backup_file": str(settings.output_file),
         }
 
-        if job_id is not None:
-            log_entry["job_id"] = job_id
+        if truenas_job_id is not None:
+            log_entry["truenas_job_id"] = truenas_job_id
         if filesize_bytes is not None:
             log_entry["filesize_bytes"] = filesize_bytes
         if error_details:

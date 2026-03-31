@@ -102,7 +102,7 @@ Each run appends one JSON object to the configured JSONL log file, including:
 - status
 - duration
 - backup file path
-- job ID when available
+- TrueNAS job ID when available, stored as `truenas_job_id`
 - file size when available
 - error text on failure
 
